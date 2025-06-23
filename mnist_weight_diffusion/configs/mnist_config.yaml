@@ -1,0 +1,35 @@
+# MNIST Classifier Configuration
+mnist_classifier:
+  model_type: 'cnn'  # or 'mlp'
+  num_classes: 10
+  input_channels: 1
+  cnn_channels: [16, 32]
+  kernel_size: 3
+  padding: 1
+  pool_kernel: 2
+  mlp_hidden_dim: 128
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 10
+  output_path: 'outputs/mnist_models/mnist_classifier.pth'
+
+# Weight Extraction Configuration
+weight_extraction:
+  model_path: 'outputs/mnist_models/mnist_classifier.pth'
+  output_path: 'outputs/extracted_weights.pth' # We'll adjust this if we extract multiple
+
+# Weight Diffusion Model Configuration
+weight_diffusion:
+  latent_dim: 64 # Adjust based on the size of extracted weights
+  timesteps: 100
+  noise_schedule: 'linear'
+  diffusion_steps: 10
+  learning_rate: 0.0001
+  batch_size: 32
+  epochs: 50
+  output_path: 'outputs/diffusion_models/weight_diffusion.pth'
+
+# Generation Configuration
+generation:
+  num_samples: 5
+  output_dir: 'outputs/generated_weights/'
