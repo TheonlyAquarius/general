@@ -1,115 +1,74 @@
 import torch
 import torch.optim as optim
-import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import os
-import copy
-
 from target_cnn import TargetCNN
 
-def train_target_cnn(epochs=10, lr=0.001, batch_size=64, save_interval_epochs=1, trajectory_dir="trajectory_weights"):
+# --- Configuration ---
+TRAJECTORY_DIR = "trajectory_weights_cnn"
+EPOCHS = 7
+LEARNING_RATE = 0.001
+BATCH_SIZE = 64
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# --- Main Execution ---
+def train_and_capture_trajectory():
     """
-    Trains the TargetCNN model on MNIST and saves weights at specified intervals.
+    Trains a TargetCNN on MNIST and saves its state_dict after each epoch
+    to create an optimization trajectory.
     """
-    print("Starting Target CNN training...")
+    print(f"Using device: {DEVICE}")
 
-    # Setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    # Create directory to save weight trajectory
+    if not os.path.exists(TRAJECTORY_DIR):
+        os.makedirs(TRAJECTORY_DIR)
+        print(f"Created directory: {TRAJECTORY_DIR}")
 
-    # Create trajectory directory if it doesn't exist
-    os.makedirs(trajectory_dir, exist_ok=True)
-    print(f"Trajectory weights will be saved in: {trajectory_dir}")
-
-    # Data transformations
+    # Data loading and transformation
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)) # MNIST mean and std
+        transforms.Normalize((0.5,), (0.5,))
     ])
+    train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-    # Load MNIST dataset
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    test_dataset = datasets.MNIST('./data', train=False, download=True, transform=transform)
+    # Model, optimizer, and loss function
+    model = TargetCNN().to(DEVICE)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    criterion = torch.nn.CrossEntropyLoss()
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    print("MNIST dataset loaded.")
+    print("Starting training of TargetCNN...")
 
-    # Initialize model, loss, and optimizer
-    model = TargetCNN().to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    print("Model, Criterion, Optimizer initialized.")
-
-    # Save initial random weights (epoch 0)
-    initial_weights_path = os.path.join(trajectory_dir, f"weights_epoch_0.pth")
-    torch.save(copy.deepcopy(model.state_dict()), initial_weights_path)
-    print(f"Saved initial random weights to {initial_weights_path}")
+    # Save initial random weights (Epoch 0)
+    initial_save_path = os.path.join(TRAJECTORY_DIR, "weights_epoch_0.pth")
+    torch.save(model.state_dict(), initial_save_path)
+    print(f"Saved initial random weights to {initial_save_path}")
 
     # Training loop
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, EPOCHS + 1):
         model.train()
-        running_loss = 0.0
+        total_loss = 0
         for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(device), target.to(device)
+            data, target = data.to(DEVICE), target.to(DEVICE)
 
             optimizer.zero_grad()
-            outputs = model(data)
-            loss = criterion(outputs, target)
+            output = model(data)
+            loss = criterion(output, target)
             loss.backward()
             optimizer.step()
+            total_loss += loss.item()
 
-            running_loss += loss.item()
-            if (batch_idx + 1) % 100 == 0: # Print progress every 100 batches
-                print(f"Epoch [{epoch}/{epochs}], Batch [{batch_idx+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
+        avg_loss = total_loss / len(train_loader)
+        print(f"Epoch {epoch}/{EPOCHS}, Average Loss: {avg_loss:.4f}")
 
-        epoch_loss = running_loss / len(train_loader)
-        print(f"Epoch [{epoch}/{epochs}] completed. Average Training Loss: {epoch_loss:.4f}")
+        # Save model weights after each epoch
+        epoch_save_path = os.path.join(TRAJECTORY_DIR, f"weights_epoch_{epoch}.pth")
+        torch.save(model.state_dict(), epoch_save_path)
+        print(f"Saved weights for epoch {epoch} to {epoch_save_path}")
 
-        # Save model weights at specified interval
-        if epoch % save_interval_epochs == 0:
-            weights_path = os.path.join(trajectory_dir, f"weights_epoch_{epoch}.pth")
-            # We save a deepcopy of the state_dict to avoid issues if the model continues training
-            # while another part of the system might be reading the file.
-            torch.save(copy.deepcopy(model.state_dict()), weights_path)
-            print(f"Saved model weights to {weights_path}")
+    print("\nFinished training and capturing trajectory.")
+    print(f"All weight files are saved in the '{TRAJECTORY_DIR}' directory.")
 
-        # Evaluate on test set
-        model.eval()
-        test_loss = 0
-        correct = 0
-        with torch.no_grad():
-            for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
-                outputs = model(data)
-                test_loss += criterion(outputs, target).item()
-                pred = outputs.argmax(dim=1, keepdim=True)
-                correct += pred.eq(target.view_as(pred)).sum().item()
-
-        test_loss /= len(test_loader.dataset)
-        accuracy = 100. * correct / len(test_loader.dataset)
-        print(f"Test set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.2f}%)\n")
-
-    print("Target CNN training finished.")
-    final_weights_path = os.path.join(trajectory_dir, f"weights_epoch_final.pth")
-    torch.save(copy.deepcopy(model.state_dict()), final_weights_path)
-    print(f"Saved final model weights to {final_weights_path}")
-
-if __name__ == '__main__':
-    # Configuration for the training run
-    # For a quick test, you might reduce epochs. For actual trajectory capture, more epochs are better.
-    NUM_EPOCHS = 5 # Example: 5 epochs for a quick run, could be 20-50 for better trajectory
-    LEARNING_RATE = 0.001
-    BATCH_SIZE = 128
-    SAVE_INTERVAL = 1 # Save weights after every epoch
-    TRAJECTORY_SAVE_DIR = "trajectory_weights_cnn"
-
-    train_target_cnn(
-        epochs=NUM_EPOCHS,
-        lr=LEARNING_RATE,
-        batch_size=BATCH_SIZE,
-        save_interval_epochs=SAVE_INTERVAL,
-        trajectory_dir=TRAJECTORY_SAVE_DIR
-    )
+if __name__ == "__main__":
+    train_and_capture_trajectory()
