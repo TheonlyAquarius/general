@@ -29,4 +29,3 @@ class PerceiverMoEPolicy(nn.Module, PolicyAPI):
 
     def step(self, weights: torch.Tensor, t: int) -> torch.Tensor:  # type: ignore[override]
         return self.forward(weights, t)
-
