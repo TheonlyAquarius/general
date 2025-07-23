@@ -1,2 +1,5 @@
+input_dim: 256
 latent_dim: 512
 num_experts: 4
+num_latents: 256
+depth: 6

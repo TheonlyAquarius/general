@@ -1,28 +1,31 @@
 import torch
 import torch.nn as nn
+from perceiver_pytorch import PerceiverIO
+
 from .policy_api import PolicyAPI
 
-
 class PerceiverMoEPolicy(nn.Module, PolicyAPI):
-    """Placeholder Perceiver IO + Mixture-of-Experts policy.
+    """Perceiver IO with a simple Mixture-of-Experts decoder."""
 
-    This skeleton highlights where the Perceiver encoder and MoE layers
-    would be integrated. It exposes a :meth:`step` interface so the
-    training loop can remain agnostic to the underlying architecture.
-    """
-
-    def __init__(self, latent_dim: int = 512, num_experts: int = 4):
+    def __init__(self, input_dim: int, latent_dim: int = 512, num_experts: int = 4, depth: int = 6, num_latents: int = 256):
         super().__init__()
-        self.latent_dim = latent_dim
-        self.num_experts = num_experts
-        # Minimal placeholder components; real model should include cross
-        # attention and expert routing as described in ``Task-Agnostic Model
-        # Comparison and Unification".
-        self.fc = nn.Linear(latent_dim, latent_dim)
+        self.perceiver = PerceiverIO(
+            depth=depth,
+            dim=input_dim,
+            queries_dim=input_dim,
+            logits_dim=latent_dim,
+            num_latents=num_latents,
+            latent_dim=latent_dim,
+        )
+        self.experts = nn.ModuleList([nn.Linear(latent_dim, input_dim) for _ in range(num_experts)])
+        self.gate = nn.Linear(latent_dim, num_experts)
 
     def forward(self, x: torch.Tensor, t: int) -> torch.Tensor:
-        return self.fc(x)
+        latent = self.perceiver(x, queries=x)
+        weights = torch.softmax(self.gate(latent), dim=-1)
+        expert_outputs = torch.stack([expert(latent) for expert in self.experts], dim=-1)
+        out = (expert_outputs * weights.unsqueeze(-2)).sum(dim=-1)
+        return out
 
     def step(self, weights: torch.Tensor, t: int) -> torch.Tensor:  # type: ignore[override]
-        """Perform one policy step on ``weights``."""
         return self.forward(weights, t)
