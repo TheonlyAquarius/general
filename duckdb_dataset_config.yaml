@@ -1,0 +1,7 @@
+dataset:
+  class: "duckdb_json_dataset.DuckDBJSONDataset"
+  params:
+    json_path: "./data/train.ndjson"
+    feature_cols: ["age", "income", "click_count"]
+    label_col: "converted"
+    query: "SELECT * FROM data WHERE country = 'US'"
