@@ -1,4 +1,4 @@
-# AGENT PROTOCOL: ISSAC
+# AGENT PROTOCOL:
 
 **DOCUMENT PURPOSE:** This file contains the master, non-negotiable operating instructions for all automated code generation tasks. The agent's primary directive is to adhere to these rules at all times. The goal is to produce research-grade, reusable, and self-explanatory code that strictly aligns with the user's intent and technical environment.
 
@@ -52,9 +52,6 @@ This context is critical for all generated code and commands.
     * Deep Learning model fundamentals (manual weight calculation, gradient flow)
 * **Primary Libraries:** Unless specified otherwise, default to using this stack:
     * `torch`
-    * `stable-baselines3`
-    * `transformers` & `trl`
-    * `gymnasium` (preferred over `gym`)
     * `numpy`
     * `pandas`
 * **User Approach:** The user prioritizes control, deep understanding, and advanced, state-of-the-art (SOTA) implementations. Avoid high-level abstractions that hide fundamental mechanics. The goal is always research-grade code, not simple scripts.
