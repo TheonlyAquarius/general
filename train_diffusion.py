@@ -1,14 +1,17 @@
+import argparse
+from pathlib import Path
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-import os
-import glob
+
 from diffusion_model import SimpleWeightSpaceDiffusion, flatten_state_dict
 from target_cnn import TargetCNN
+from utils.paths import ensure_parent_directory, resolve_path
 
 # --- Configuration ---
-TRAJECTORY_DIR = "trajectory_weights_cnn"
-DIFFUSION_MODEL_SAVE_PATH = "diffusion_optimizer.pth"
+DEFAULT_TRAJECTORY_DIR = "trajectory_weights_cnn"
+DEFAULT_DIFFUSION_MODEL_PATH = "diffusion_optimizer.pth"
 EPOCHS = 50
 LEARNING_RATE = 0.0001
 BATCH_SIZE = 4
@@ -20,11 +23,14 @@ class WeightTrajectoryDataset(Dataset):
     Dataset to load pairs of consecutive weights from a directory.
     Each item is (current_weights, next_weights, timestep).
     """
-    def __init__(self, trajectory_dir, ref_state_dict):
-        self.file_paths = sorted(
-            glob.glob(os.path.join(trajectory_dir, "weights_epoch_*.pth")),
-            key=lambda x: int(os.path.basename(x).split('_')[-1].split('.')[0])
-        )
+    def __init__(self, trajectory_dir: Path, ref_state_dict):
+        def sort_key(path: Path) -> int:
+            try:
+                return int(path.stem.split("_")[-1])
+            except ValueError:
+                return -1
+
+        self.file_paths = sorted(trajectory_dir.glob("weights_epoch_*.pth"), key=sort_key)
         self.ref_state_dict = ref_state_dict
 
     def __len__(self):
@@ -48,7 +54,14 @@ class WeightTrajectoryDataset(Dataset):
         return current_weights_flat, next_weights_flat, timestep
 
 # --- Main Training Function ---
-def train_diffusion_model(trajectory_dir, target_model_ref_for_dims, epochs, lr, batch_size, save_path):
+def train_diffusion_model(
+    trajectory_dir: Path,
+    target_model_ref_for_dims,
+    epochs: int,
+    lr: float,
+    batch_size: int,
+    save_path: Path
+) -> None:
     """
     Trains the diffusion model on the saved weight trajectory.
     """
@@ -100,13 +113,19 @@ def train_diffusion_model(trajectory_dir, target_model_ref_for_dims, epochs, lr,
     print(f"\nTraining finished. Diffusion model saved to '{save_path}'.")
 
 if __name__ == "__main__":
-    # Create a reference model instance to get its structure
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trajectory-dir", type=str, default=DEFAULT_TRAJECTORY_DIR)
+    parser.add_argument("--diffusion-model-path", type=str, default=DEFAULT_DIFFUSION_MODEL_PATH)
+    parser.add_argument("--output-base-dir", type=str, default=None)
+    args = parser.parse_args()
+    trajectory_dir = resolve_path(args.trajectory_dir, base_dir=args.output_base_dir)
+    save_path = ensure_parent_directory(args.diffusion_model_path, base_dir=args.output_base_dir)
     ref_model = TargetCNN()
     train_diffusion_model(
-        trajectory_dir=TRAJECTORY_DIR,
+        trajectory_dir=trajectory_dir,
         target_model_ref_for_dims=ref_model.state_dict(),
         epochs=EPOCHS,
         lr=LEARNING_RATE,
         batch_size=BATCH_SIZE,
-        save_path=DIFFUSION_MODEL_SAVE_PATH
+        save_path=save_path
     )

@@ -1,29 +1,28 @@
+import argparse
+from pathlib import Path
+
 import torch
 import torch.optim as optim
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-import os
+from torchvision import datasets, transforms
+
 from target_cnn import TargetCNN
+from utils.paths import ensure_directory, resolve_path
 
 # --- Configuration ---
-TRAJECTORY_DIR = "trajectory_weights_cnn"
+DEFAULT_TRAJECTORY_DIR = "trajectory_weights_cnn"
 EPOCHS = 7
 LEARNING_RATE = 0.001
 BATCH_SIZE = 64
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- Main Execution ---
-def train_and_capture_trajectory():
+def train_and_capture_trajectory(trajectory_dir: Path) -> None:
     """
     Trains a TargetCNN on MNIST and saves its state_dict after each epoch
     to create an optimization trajectory.
     """
     print(f"Using device: {DEVICE}")
-
-    # Create directory to save weight trajectory
-    if not os.path.exists(TRAJECTORY_DIR):
-        os.makedirs(TRAJECTORY_DIR)
-        print(f"Created directory: {TRAJECTORY_DIR}")
 
     # Data loading and transformation
     transform = transforms.Compose([
@@ -41,7 +40,7 @@ def train_and_capture_trajectory():
     print("Starting training of TargetCNN...")
 
     # Save initial random weights (Epoch 0)
-    initial_save_path = os.path.join(TRAJECTORY_DIR, "weights_epoch_0.pth")
+    initial_save_path = trajectory_dir / "weights_epoch_0.pth"
     torch.save(model.state_dict(), initial_save_path)
     print(f"Saved initial random weights to {initial_save_path}")
 
@@ -63,12 +62,22 @@ def train_and_capture_trajectory():
         print(f"Epoch {epoch}/{EPOCHS}, Average Loss: {avg_loss:.4f}")
 
         # Save model weights after each epoch
-        epoch_save_path = os.path.join(TRAJECTORY_DIR, f"weights_epoch_{epoch}.pth")
+        epoch_save_path = trajectory_dir / f"weights_epoch_{epoch}.pth"
         torch.save(model.state_dict(), epoch_save_path)
         print(f"Saved weights for epoch {epoch} to {epoch_save_path}")
 
     print("\nFinished training and capturing trajectory.")
-    print(f"All weight files are saved in the '{TRAJECTORY_DIR}' directory.")
+    print(f"All weight files are saved in '{trajectory_dir}'.")
 
 if __name__ == "__main__":
-    train_and_capture_trajectory()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trajectory-dir", type=str, default=DEFAULT_TRAJECTORY_DIR)
+    parser.add_argument("--output-base-dir", type=str, default=None)
+    args = parser.parse_args()
+    trajectory_dir = resolve_path(args.trajectory_dir, base_dir=args.output_base_dir)
+    if not trajectory_dir.exists():
+        ensure_directory(trajectory_dir)
+        print(f"Created directory: {trajectory_dir}")
+    else:
+        ensure_directory(trajectory_dir)
+    train_and_capture_trajectory(trajectory_dir)

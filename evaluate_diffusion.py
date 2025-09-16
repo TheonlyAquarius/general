@@ -1,13 +1,17 @@
+import argparse
+from pathlib import Path
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-import os
+from torchvision import datasets, transforms
 import numpy as np
 import matplotlib.pyplot as plt
 
 from target_cnn import TargetCNN
 from diffusion_model import SimpleWeightSpaceDiffusion, flatten_state_dict, unflatten_to_state_dict, get_target_model_flat_dim
+from utils.paths import ensure_parent_directory, resolve_path
 
 def evaluate_model_performance(model, test_loader, device, criterion):
     """Evaluates the model on the test set and returns accuracy and loss."""
@@ -68,12 +72,13 @@ def generate_trajectory_with_diffusion(
 
 
 def evaluate_diffusion_generated_trajectory(
-    diffusion_model_path,
-    target_cnn_reference, # An instance of TargetCNN
-    trajectory_dir_original_cnn, # To get initial random weights & number of steps
-    batch_size_eval=256,
-    plot_results=True
-):
+    diffusion_model_path: Path,
+    target_cnn_reference: TargetCNN,
+    trajectory_dir_original_cnn: Path,
+    plot_path: Optional[Path],
+    batch_size_eval: int = 256,
+    plot_results: bool = True
+) -> None:
     print("Starting evaluation of diffusion-generated trajectory...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -109,9 +114,8 @@ def evaluate_diffusion_generated_trajectory(
     print(f"Diffusion model loaded from {diffusion_model_path}")
 
     # --- 3. Prepare Initial Weights and Trajectory Length ---
-    # Use the initial random weights (epoch 0) from the original CNN training as the starting point
-    initial_cnn_weights_path = os.path.join(trajectory_dir_original_cnn, "weights_epoch_0.pth")
-    if not os.path.exists(initial_cnn_weights_path):
+    initial_cnn_weights_path = trajectory_dir_original_cnn / "weights_epoch_0.pth"
+    if not initial_cnn_weights_path.exists():
         print(f"Initial weights file not found: {initial_cnn_weights_path}")
         print("Cannot proceed. Ensure 'train_target_model.py' was run and weights_epoch_0.pth exists.")
         return
@@ -120,11 +124,11 @@ def evaluate_diffusion_generated_trajectory(
     initial_weights_flat = flatten_state_dict(initial_cnn_state_dict).to(device)
 
     # Determine the number of steps from the original trajectory
-    # The diffusion model was trained to predict N-1 transitions if there were N states (0 to N-1)
-    original_weight_files = sorted(
-        glob.glob(os.path.join(trajectory_dir_original_cnn, "weights_epoch_*.pth")),
-        key=lambda x: int(x.split('_')[-1].split('.')[0]) if x.split('_')[-1].split('.')[0].isdigit() else -1
-    )
+    def sort_key(path: Path) -> int:
+        name = path.stem.split("_")[-1]
+        return int(name) if name.isdigit() else -1
+
+    original_weight_files = sorted(trajectory_dir_original_cnn.glob("weights_epoch_*.pth"), key=sort_key)
     # Number of steps for generation should match the number of transitions the diffusion model learned
     # If N states (W_0, ..., W_{N-1}), there are N-1 transitions.
     # The timesteps t used during training were 0, 1, ..., N-2.
@@ -180,11 +184,11 @@ def evaluate_diffusion_generated_trajectory(
     # --- 6. (Optional) Load and Evaluate Original Trajectory for Comparison ---
     accuracies_original = []
     losses_original = []
-    if os.path.exists(trajectory_dir_original_cnn):
+    if trajectory_dir_original_cnn.exists():
         print("\nEvaluating performance along the original CNN training trajectory...")
         for i in range(num_generation_steps + 1): # Evaluate N states (0 to N-1)
-            weight_file = os.path.join(trajectory_dir_original_cnn, f"weights_epoch_{i}.pth")
-            if os.path.exists(weight_file):
+            weight_file = trajectory_dir_original_cnn / f"weights_epoch_{i}.pth"
+            if weight_file.exists():
                 state_dict_orig = torch.load(weight_file, map_location=device)
                 eval_model.load_state_dict(state_dict_orig)
                 acc, loss = evaluate_model_performance(eval_model, test_loader, device, criterion)
@@ -199,7 +203,7 @@ def evaluate_diffusion_generated_trajectory(
 
 
     # --- 7. Plot Results if enabled ---
-    if plot_results:
+    if plot_results and plot_path is not None:
         print("\nPlotting results...")
         plt.figure(figsize=(12, 5))
 
@@ -225,34 +229,39 @@ def evaluate_diffusion_generated_trajectory(
         plt.grid(True)
 
         plt.tight_layout()
-        plot_save_path = "diffusion_evaluation_plot.png"
-        plt.savefig(plot_save_path)
-        print(f"Plot saved to {plot_save_path}")
+        plt.savefig(plot_path)
+        print(f"Plot saved to {plot_path}")
         # plt.show() # This might not work in all environments; saving is safer.
 
     print("Evaluation finished.")
 
 
 if __name__ == '__main__':
-    # --- Configuration for Evaluation ---
-    DIFFUSION_MODEL_LOAD_PATH = "diffusion_optimizer.pth" # Path to the trained diffusion model
-    CNN_TRAJECTORY_DIR = "trajectory_weights_cnn"       # Directory of the original CNN's saved weights
-
-    # --- End Configuration ---
-
-    if not os.path.exists(DIFFUSION_MODEL_LOAD_PATH):
-        print(f"Error: Trained diffusion model not found at '{DIFFUSION_MODEL_LOAD_PATH}'.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--diffusion-model-path", type=str, default="diffusion_optimizer.pth")
+    parser.add_argument("--trajectory-dir", type=str, default="trajectory_weights_cnn")
+    parser.add_argument("--plot-path", type=str, default="diffusion_evaluation_plot.png")
+    parser.add_argument("--output-base-dir", type=str, default=None)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--no-plot", action="store_true")
+    args = parser.parse_args()
+    base_dir = args.output_base_dir
+    diffusion_model_path = resolve_path(args.diffusion_model_path, base_dir=base_dir)
+    trajectory_dir = resolve_path(args.trajectory_dir, base_dir=base_dir)
+    plot_path = None if args.no_plot else ensure_parent_directory(args.plot_path, base_dir=base_dir)
+    if not diffusion_model_path.exists():
+        print(f"Error: Trained diffusion model not found at '{diffusion_model_path}'.")
         print("Please run 'train_diffusion.py' first.")
-    elif not os.path.exists(CNN_TRAJECTORY_DIR) or not os.listdir(CNN_TRAJECTORY_DIR):
-        print(f"Error: CNN trajectory directory '{CNN_TRAJECTORY_DIR}' is empty or does not exist.")
+    elif not trajectory_dir.is_dir() or not any(trajectory_dir.iterdir()):
+        print(f"Error: CNN trajectory directory '{trajectory_dir}' is empty or does not exist.")
         print("Please run 'train_target_model.py' first.")
     else:
-        # Initialize a reference TargetCNN model (architecture must match the one used for training)
         reference_cnn_instance = TargetCNN()
-
         evaluate_diffusion_generated_trajectory(
-            diffusion_model_path=DIFFUSION_MODEL_LOAD_PATH,
+            diffusion_model_path=diffusion_model_path,
             target_cnn_reference=reference_cnn_instance,
-            trajectory_dir_original_cnn=CNN_TRAJECTORY_DIR,
-            plot_results=True # Set to False if you don't have matplotlib or a display
+            trajectory_dir_original_cnn=trajectory_dir,
+            plot_path=plot_path,
+            batch_size_eval=args.batch_size,
+            plot_results=not args.no_plot
         )
